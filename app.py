@@ -4,12 +4,14 @@ from time import sleep, time
 from brazilcep import get_address_from_cep, WebService
 from geopy.geocoders import Nominatim
 from db.db_connection import DbConnection
+from dotenv import dotenv_values
 
-URL = "https://minhareceita.org/"
-URL_CEP = "https://www.cepaberto.com/api/v3/cep?cep="
 
 def create_transaction_data():
-    """Method responsible for extract data from api and insert into database"""
+    """Method responsible for extract CNPJs data and insert into database with minhareceita.org
+    """
+    URL_MINHA_RECEITA = "https://minhareceita.org/"
+
     start = time()
     query = """
         SELECT
@@ -32,9 +34,8 @@ def create_transaction_data():
     count = 0
 
     for record in records:
-        count += 1
         print("Making request")
-        response = requests.get(url=URL+record[1])
+        response = requests.get(url=URL_MINHA_RECEITA+record[1])
 
         response_dict = response.json()
 
@@ -55,11 +56,12 @@ def create_transaction_data():
             print(f"{count} Transaction {record[0]} inserted")
         else:
             print(f"Request failed, status code: {response.status_code}")
+        count += 1
     end = time()
     print(f"Data insert done in {round(end - start, 2)}")
 
 def create_cep_data_with_geopy():
-    """Method responsible for create latitude and longitude to brazilian postal codes
+    """Method responsible for get geolocation from brazilian address with geopy
     """
     query = """
         SELECT num_cep
@@ -73,11 +75,9 @@ def create_cep_data_with_geopy():
 
     geolocator = Nominatim(user_agent="test_app")
    
-    #records.reverse()
     count = 0
 
     for record in records:
-        count += 1
         address = None
         try:
             address = get_address_from_cep(record[0], webservice=WebService.APICEP)
@@ -153,9 +153,14 @@ def create_cep_data_with_geopy():
             sleep(3)
         else:
             print(f"{count} Address not found for CEP: {record[0]}")
+        count += 1
 
 
 def create_cep_data_with_cep_aberto():
+    """Method responsible for get geolocation from brazilian postal codes with cep aberto
+    """
+    URL_CEP_ABERTO = "https://www.cepaberto.com/api/v3/cep?cep="
+
     query = """
         with asd as (
             select distinct num_cep
@@ -178,16 +183,15 @@ def create_cep_data_with_cep_aberto():
     db = DbConnection()
     records = db.run_query(query, get_all=True)
     
-    header = {"Authorization": "Token token=3531bbc8884f7df49a7d4e8811e736ef"}
+    header = {"Authorization": f"Token token={dotenv_values(".env")["CEP_ABERTO_API_KEY"]}"}
 
-    count = 10000
+    count = 0
     for record in records:
-        count -= 1
         if count == 0:
             print("Requests limit reached")
             break
         try:
-            response = requests.get(url=URL_CEP+record[0], headers=header)
+            response = requests.get(url=URL_CEP_ABERTO+record[0], headers=header)
         except Exception as e:
             print("Some problem hapened with response")
             response = None
@@ -209,14 +213,14 @@ def create_cep_data_with_cep_aberto():
             print(f"{count} Inserted data on DB")
         else:
             print(f"{count} Something it wrong with the request, response status code: {response.status_code}")
+        count += 1
 
 def create_cep_data_with_bing_maps():
-    """Method responsible for get geolocation from brazilian postal codes
+    """Method responsible for get geolocation from brazilian postal codes with bing maps
     """
     start_time = time()
 
     api_url = "http://dev.virtualearth.net/REST/v1/Locations"
-    api_key = "ApRqdaFghKf1I4LaqKCeadXSOjOMsN3mjy7iOlT6rZUwJ2FTqNJg_eoecLHx6EPF"
 
     query = """
         with asd as (
@@ -241,11 +245,10 @@ def create_cep_data_with_bing_maps():
 
     count = 0
     for record in records:
-        count += 1
         payload = {
             "countryRegion": "brazil",
             "postalCode": f"{record[0]}",
-            "key": api_key
+            "key": dotenv_values(".env")["BING_API_KEY"]
         }
 
         response = requests.get(url=api_url, params=payload)
@@ -283,8 +286,23 @@ def create_cep_data_with_bing_maps():
                 print(f"{count} Something went wrong with received data")
         else:
             print(f"{count} Something it wrong with the request, response status code: {response.status_code}")
+        count += 1
     end_time = time()
     print(f"All data was charged in {round(end_time - start_time, 2)} hours")
+
+def create_cep_data_with_azure_maps():
+    """Method responsible for get geolocation from brazilian postal codes with azure maps
+    """
+    url = "https://atlas.microsoft.com/search/fuzzy/json"
+
+    payload = {
+        "api-version": 1.0,
+        "query": "cep",
+        "countrySet": "BR"
+        "subscription-key": dotenv_values(".env")["AZURE_API_KEY"],
+    }
+
+
 
 
 def main():
@@ -294,6 +312,7 @@ def main():
         2 - Create CEP data with CEP aberto API \n
         3 - Create transaction data with minha receita \n
         4 - Create CEP data with Bing Maps API \n
+        5 - Create CEP data with Azure Maps API \n
         """
     )
 
@@ -306,6 +325,8 @@ def main():
             create_transaction_data()
         case "4":
             create_cep_data_with_bing_maps()
+        case: "5":
+            create_cep_data_with_azure_maps()
         case _:
             print("Choice unavailable")
 
